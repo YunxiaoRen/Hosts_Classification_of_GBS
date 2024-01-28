@@ -1,0 +1,176 @@
+---
+title: "Fig2_performance_plot"
+author: "yunxiao"
+output: html_document
+---
+
+
+
+## 1. Load data and pacakge                           
+
+```{r}
+#rm(list = ls())
+library(tidyverse)
+library(ggpubr)
+library(ggplot2)
+library(ggsci)
+library(scales)
+#mypal = pal_npg("nrc")(9)
+#show_col(mypal)
+#mypal2 = pal_jco()(9)
+#show_col(mypal2)
+load("host_models_compare.Rdata")
+```
+
+## 2. models' performance on trainging set  
+
+### 2.1 RF
+```{r}
+#RF
+rf_value <- models_compare$values[,c(1,2,3,4,8,11,12,13,14)]
+rf_value$model = rep("RF",30)
+rf_value
+names(rf_value)[2:9] = c("Accuracy","AUC","Kappa","Mean_F1","Mean_Precision","Mean_Recall",
+                         "Mean_Sensitivity","Mean_Specificity")
+```
+### 2.2 Linear SVM and poly SVM
+```{r}
+## Linear SVM
+svm_value_li <- models_compare$values[,c(1,16,17,18,22,25,26,27,28)]
+svm_value_li
+svm_value_li$model = rep("SVM_li",30)
+names(svm_value_li)[2:9] = c("Accuracy","AUC","Kappa","Mean_F1","Mean_Precision","Mean_Recall",
+                          "Mean_Sensitivity","Mean_Specificity")
+
+## Poly SVM
+
+svm_value_poly <- models_compare$values[,c(1,30,31,32,36,39,40,41,42)]
+svm_value_poly
+svm_value_poly$model = rep("SVM_poly",30)
+names(svm_value_poly)[2:9] = c("Accuracy","AUC","Kappa","Mean_F1","Mean_Precision","Mean_Recall",
+                          "Mean_Sensitivity","Mean_Specificity")
+```
+
+### 2.3 LR
+```{r}
+lr_value <- models_compare$values[,c(1,44,45,46,50,53,54,55,56)]
+lr_value
+lr_value$model = rep("LR",30)
+names(lr_value)[2:9] = c("Accuracy","AUC","Kappa","Mean_F1","Mean_Precision","Mean_Recall",
+                         "Mean_Sensitivity","Mean_Specificity")
+```
+
+### 2.4 combined the dataset about RF, LR, and poly SVM
+```{r}
+rbind(rf_value,svm_value_poly,lr_value) %>%
+   gather(metrics,values,-c(1,10)) -> models_compare_long
+
+models_compare_long$model[which(models_compare_long$model=="SVM_poly")]<- "SVM"
+```
+
+
+## 3. comapre the performance and Plot
+```{r}
+
+my_comparisons = list( c("RF", "LR"), c("RF", "SVM"), c("SVM", "LR") )
+compare_means(values ~ model, models_compare_long, method = "wilcox.test", 
+               p.adjust.method = "bonferroni",
+               group.by = "metrics")
+p0<- ggbarplot(models_compare_long,x="model",y="values",fill = "model",
+          palette = c("#3C5488FF","#EFC000FF","#868686FF"), 
+          #palette = "jco", 
+          facet.by = "metrics",
+          nrow=2,
+          add = "mean_se",
+          position = position_dodge(0.8),alpha = 0.7) +
+          stat_compare_means(comparisons = my_comparisons,method = "wilcox.test",
+                             label = "p.signif",p.adjust.method = "bonferroni") +   # Add pairwise comparisons p-value
+          #stat_compare_means(label.y = 1.10) +
+          labs(x = "",y="Model Performace")+
+          scale_y_continuous(expand=c(0.02,0),limits=c(0, 1.27),breaks=seq(0,1.27,0.2))+
+          theme(legend.position = 'none')
+p0
+ggsave("Fig2_host_train_models_compare_barplot_pavlue.pdf",width = 8,height =6,dpi = 300)
+```
+
+
+## 4. Plot model performance on test data    
+
+### 4.1 prepare the data
+```{r}
+library(ggradar)
+#library(ggradarSIZE)
+## load data
+load("host_rf_conMatrix.Rdata")
+load("host_lr_conMatrix_multinom.Rdata")
+load("host_svm_poly_conMatrix.Rdata")
+
+rf_conMatrix_d <- as.data.frame(rf_conMatrix$byClass)
+row.names(rf_conMatrix_d) =c("Bovine","Fish","Human","Pig")
+names(rf_conMatrix_d)[c(3:4,9:11)]=c("Pos_Pred_Value","Neg_Pred_Value","Detection_Rate",
+                                     "Detection_Prevalence","Balanced_Accuracy")
+rf_conMatrix_d$Class = row.names(rf_conMatrix_d)
+rf_conMatrix_d2 <- rf_conMatrix_d[,c(12,1:11)]
+rf_conMatrix_d2
+
+
+lr_conMatrix_d <- as.data.frame(lr_conMatrix$byClass)
+row.names(lr_conMatrix_d) =c("Bovine","Fish","Human","Pig")
+names(lr_conMatrix_d)[c(3:4,9:11)]=c("Pos_Pred_Value","Neg_Pred_Value","Detection_Rate",
+                                     "Detection_Prevalence","Balanced_Accuracy")
+lr_conMatrix_d
+lr_conMatrix_d$Class = row.names(lr_conMatrix_d)
+lr_conMatrix_d2 <- lr_conMatrix_d[,c(12,1:11)]
+lr_conMatrix_d2
+
+svm_conMatrix_d <- as.data.frame(svm_conMatrix_poly$byClass)
+row.names(svm_conMatrix_d) =c("Bovine","Fish","Human","Pig")
+names(svm_conMatrix_d)[c(3:4,9:11)]=c("Pos_Pred_Value","Neg_Pred_Value","Detection_Rate",
+                                     "Detection_Prevalence","Balanced_Accuracy")
+svm_conMatrix_d
+svm_conMatrix_d$Class = row.names(svm_conMatrix_d)
+svm_conMatrix_d2 <- svm_conMatrix_d[,c(12,1:11)]
+svm_conMatrix_d2
+
+lcols <- c("#0073C2FF","#EFC000FF","#868686FF","#CD534CFF")
+
+```
+
+### Plot
+```{r}
+p1 <- ggradar(rf_conMatrix_d2[,c(1:3,6:8)],base.size = 12,
+        legend.text.size = 12,
+        legend.position = "right",
+        group.line.width = 1,
+        group.point.size = 4,
+        group.colours = lcols)
+
+p2 <- ggradar(lr_conMatrix_d2[,c(1:3,6:8)],base.size = 12,
+              legend.text.size = 12,
+              legend.position = "right",
+              group.line.width = 1,
+              group.point.size = 4,
+              group.colours = lcols)
+
+p3 <- ggradar(svm_conMatrix_d2[,c(1:3,6:8)],base.size = 12,
+              legend.text.size = 12,
+              legend.position = "right",
+              group.line.width = 1,
+              group.point.size = 4,
+              group.colours = lcols)
+
+library(patchwork)
+
+p4 <- p1 + p2 + p3 + plot_layout(guides = 'collect',nrow = 1)
+p4
+ggsave("host_test_radarplot_multinom.pdf",width = 6,height = 10,dpi = 300)
+```
+## 5. output all plot
+```{r}
+
+p5<- p0 + p4 + plot_layout(widths = c(3, 1),ncol = 1)
+p5
+
+ggsave("Fig2_all_host_performance_all_plot.pdf",width = 10,height = 10,dpi = 300)
+
+```

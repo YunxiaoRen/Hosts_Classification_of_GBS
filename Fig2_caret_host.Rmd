@@ -1,0 +1,229 @@
+---
+title: "host_classification_caret"
+author: "yunxiao"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 1. Load the caret package
+
+```{r}
+library(caret)
+library(randomForest)
+library(kernlab)
+library(caTools)
+library(MLmetrics)
+```
+
+## 2. Data Processing
+
+### Split train and test data; define the training control
+
+```{r}
+rm(list=ls())
+data <- read.csv("host_final_filter_data.csv")
+dim(data)
+ #[1] 1241 3895
+ data[1:5,1:5]
+ names(data)[1]="sample_name"
+#
+pheno <- read.csv("host_final_pheno.csv")
+head(pheno)
+pheno$label[pheno$label==0]="Bovine"
+pheno$label[pheno$label==1]="Fish"
+pheno$label[pheno$label==2]="Human"
+pheno$label[pheno$label==3]="Pig"
+#
+rawdata <- merge(pheno,data,by="sample_name")
+dim(rawdata)
+rawdata[1:5,1:5]
+rownames(rawdata) = rawdata$sample_name
+rawdata = rawdata[,-1]
+## Create the training and test datasets
+set.seed(100)
+
+rawdata$label=as.factor(rawdata$label) # important for svm/lr model
+# Step 1: Get row numbers for the training data
+trainRowNumbers <- createDataPartition(rawdata$label, p=0.8, list=FALSE)
+# Step 2: Create the training  dataset
+trainData <- rawdata[trainRowNumbers,]
+save(trainData, file="host_model_trainData.Rdata")
+write.csv(trainData,file="host_model_trainData.csv",quote = F)
+# Step 3: Create the test dataset
+testData <- rawdata[-trainRowNumbers,]
+dim(testData)
+save(testData, file="host_model_testData.Rdata")
+write.csv(testData,file="host_model_testData.csv",quote = F)
+
+```
+
+### load train and test data
+
+```{r}
+load("host_model_trainData.Rdata")
+dim(trainData)
+load("host_model_testData.Rdata")
+dim(testData)
+```
+
+### Define the training control
+```{r}
+
+fitControl <- trainControl(
+  method = 'repeatedcv',                   # k-fold cross validation
+  number = 10,   # number of folds
+  repeats = 3,
+  savePredictions = 'final',       # saves predictions for optimal tuning parameter
+  classProbs = T,                  # should class probabilities be returned
+  summaryFunction=multiClassSummary  # results summary function. twoClassSummary or multiClassSummary
+)
+
+```
+
+## 3. Model Training     
+
+### 3.1 Train the model using RF, SVM(linear,polynomial), LR  
+
+#### RF
+```{r}
+set.seed(100)
+model_rf = train(label ~ ., data=trainData, method='rf',tuneLength=5, trControl = fitControl)
+model_rf
+# Print the best tuning parameter sigma and C that maximizes model accuracy
+model_rf$bestTune
+#mtry=88
+save(model_rf, file="host_model_rf.Rdata")
+
+```
+
+#### SVM Linear
+
+```{r}
+set.seed(100)
+model_svm_li =  train(label ~ ., data=trainData, method='svmLinear',tuneLength=5, trControl = fitControl)
+model_svm_li
+# Print the best tuning parameter sigma and C that maximizes model accuracy
+model_svm_li$bestTune
+# C= 1
+save(model_svm_li, file="host_model_svmLinear.Rdata")
+```
+#### SVM Polynomial
+
+```{r}
+set.seed(100)
+model_svm_poly =  train(label ~ ., data=trainData, method='svmPoly',tuneLength=5, trControl = fitControl)
+model_svm_poly
+# Print the best tuning parameter sigma and C that maximizes model accuracy
+model_svm_poly$bestTune
+#The final values used for the model were degree = 1, scale = 10 and C = 1.
+
+save(model_svm_poly, file="host_model_svmPoly.Rdata")
+```
+
+#### Logistic regression 
+
+```{r}
+set.seed(100)
+model_lr =  train(label ~ ., data=trainData, method='multinom',tuneLength=5,trControl = fitControl,trace = FALSE,MaxNWts=100000)
+model_lr
+# Print the best tuning parameter sigma and C that maximizes model accuracy
+model_lr$bestTune
+#  decay
+#5   0.1
+save(model_lr, file="host_model_lr_multinom.Rdata")
+```
+
+
+### 3.2 Compare models' performances
+```{r}
+
+# Compare model performances using resample()
+models_compare <- resamples(list(RF=model_rf, SVM_linear=model_svm_li, SVM_poly=model_svm_poly, LR=model_lr))
+# Summary of the models performances
+summary(models_compare)
+summary_out = summary(models_compare)
+
+save(models_compare, file="host_models_compare.Rdata")
+write.csv(models_compare$values,file="host_models_compare_out.csv",quote = F,row.names = F)
+
+```
+
+
+## 4. Model Prediction
+
+```{r}
+## prediction
+
+## RF
+rf_predicteds <- predict(model_rf, newdata=testData)
+head(rf_predicteds)
+rf_predicteds_probs <- predict(model_rf, newdata=testData,'prob')
+save(rf_predicteds_probs,file = "rf_predicteds_probs.Rdata")
+write.csv(rf_predicteds_probs,file = "rf_predicteds_probs.csv",quote = F)
+rf_conMatrix = confusionMatrix(reference = as.factor(testData$label), data = rf_predicteds, mode='everything')
+save(rf_conMatrix, file="host_rf_conMatrix.Rdata")
+
+## LR
+lr_predicteds <- predict(model_lr, newdata=testData)
+head(lr_predicteds)
+lr_predicteds_probs <- predict(model_lr, newdata=testData,'prob')
+write.csv(lr_predicteds_probs,file = "lr_predicteds_probs.csv",quote = F)
+lr_conMatrix = confusionMatrix(reference = as.factor(testData$label), data =lr_predicteds, mode='everything')
+save(lr_conMatrix, file="host_lr_conMatrix_multinom.Rdata")
+
+## SVM Linear
+svm_predicteds_li <- predict(model_svm_li, newdata=testData)
+head(svm_predicteds_li)
+svm_predicteds_probs_li <- predict(model_svm_li, newdata=testData,'prob')
+write.csv(svm_predicteds_probs_li,file = "svm_predicteds_probs_li.csv",quote = F)
+svm_conMatrix_li = confusionMatrix(reference = as.factor(testData$label), data = svm_predicteds_li, mode='everything')
+save(svm_conMatrix_li, file="host_svm_li_conMatrix.Rdata")
+
+## SVM Poly
+svm_predicteds_poly <- predict(model_svm_poly, newdata=testData)
+head(svm_predicteds_poly)
+svm_predicteds_probs_poly <- predict(model_svm_poly, newdata=testData,'prob')
+write.csv(svm_predicteds_probs_poly,file = "svm_predicteds_probs_poly.csv",quote = F)
+svm_conMatrix_poly = confusionMatrix(reference = as.factor(testData$label), data = svm_predicteds_poly, mode='everything')
+save(svm_conMatrix_poly, file="host_svm_poly_conMatrix.Rdata")
+```
+
+
+## 5. Correlation 
+
+```{r}
+## Ref lab
+ref = as.factor(testData$label)
+
+## prediction
+rf_predicteds # false predicted (22,87,92,136,162,198)
+lr_predicteds # false predicted (22,87,92,131,136,162)
+svm_predicteds_li
+svm_predicteds_poly
+
+#### false prediction by shap on RF and LR
+false_pre_dat<- testData[c(22,87, 92,136,162,198),]
+true_name = false_pre_dat$label
+true_name
+```
+
+### correlation plot
+
+```{r}
+
+library(corrplot)
+t2 = as.data.frame(t(false_pre_dat))
+names(t2)=c("Fish1","Human","Pig","Bovine1","Bovine2","Fish2")
+t3= as.data.frame(sapply(t2[2:3895,1:6], as.numeric))
+env.cor <- round(cor(t3, method = 'pearson'),3)
+col2 <- colorRampPalette(c("#053061","#2166AC","#4393C3","#92C5DE","#D1E5F0",
+                           "#FFFFFF","#FDDBC7","#F4A582","#D6604D","#B2182B", "#67001F"))
+pdf(file="host_false_pre_cor_shap_RF_LR.pdf")
+corrplot.mixed(env.cor,order = 'AOE',tl.col = "black",upper.col = col2(200))
+dev.off()
+
+```
+
